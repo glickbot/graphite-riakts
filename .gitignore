@@ -1,0 +1,7 @@
+storage/*
+var/*
+.python-version
+env/*
+download/*
+.vagrant/*
+*.pyc
