@@ -32,14 +32,6 @@ try:
 except RiakError:
 	rc.ts_query(table_name, create_q)
 
-#schema_content = """
-#"""
-
-#try:
-#	rc.get_search_schema(node_table_name)
-#except RiakError:
-#	rc.create_search_schema(node_table_name, schema_content)
-
 try:
   rc.get_search_index(node_table_name)
 except RiakError:
