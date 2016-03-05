@@ -5,3 +5,4 @@ env/*
 download/*
 .vagrant/*
 *.pyc
+.idea/*

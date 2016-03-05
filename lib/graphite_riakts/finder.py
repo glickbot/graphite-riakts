@@ -1,4 +1,3 @@
-import itertools
 import time
 import re
 
@@ -12,28 +11,16 @@ except ImportError:
 from riak import RiakClient
 from datetime import datetime, timedelta
 
-def branch_query(pattern):
-    pattern = re.sub('\.','\.',pattern)
-    return "/" + ".*".join(pattern.split('*')) + "/"
-
-def node_query(pattern):
-    pattern = re.sub('\.','\.',pattern)
-    return "/" + "[^.]*".join(pattern.split('*')) + "/"
-
-def maybe_add_wild(pattern):
-    pattern = re.sub('\.select metric','',pattern)
-    if re.match('\*', pattern):
-        return pattern
-    else:
-        return re.sub('[.*]*$', '', pattern) + ".*"
 
 def dt_to_ms(dt):
     td = dt - datetime.utcfromtimestamp(0)
     return int(td.total_seconds() * 1000.0)
 
+
 def dt_to_timestamp(dt):
     td = dt - datetime.utcfromtimestamp(0)
     return int(td.total_seconds())
+
 
 class RiakTSFinder(object):
     def __init__(self, config):
@@ -41,7 +28,7 @@ class RiakTSFinder(object):
         self.riak = RiakClient(host=config['riak_ts']['host'],port=config['riak_ts']['port'])
 
     def find_nodes(self, query):
-        print vars(query)
+        #print vars(query)
         bucket = self.riak.bucket_type('default').bucket('metric_nodes')
 
         exact = bucket.get(query.pattern)
@@ -49,40 +36,31 @@ class RiakTSFinder(object):
         if exact.exists:
             yield LeafNode(query.pattern,RiakTSReader(query.pattern, self.riak, self.config))
         else:
-            # find branches
-            #print "Before MAW: %s" % query.pattern
-            pattern = maybe_add_wild(query.pattern)
-            #print "After MAW: %s" % pattern
-            solr_query = branch_query(pattern)
-            #print "Finding branches with query: %s" % solr_query
-            results = bucket.search("branch_s:%s" % solr_query, index='metric_nodes')
-            # print(results['docs'][0]['name_s'])
-            print "Branch search results"
+            pattern = query.pattern
+            pattern = re.sub('\.select metric','',pattern)
+            if re.match('^[^*]*$', pattern):
+              pattern = re.sub('\.*$', '.*', pattern)
+            pattern = re.sub('\*','[^.]*', pattern)
+            print "Solr pattern: %s" % pattern
+            results = bucket.search("branch_s:/%s/" % pattern, index='metric_nodes', rows=1000000)
+            #print "Branch search results"
             print(results)
-            if len(results['docs']) > 0:
-                root_len = len(pattern.split('.')) - 1
-                branches = {}
-                for doc in results['docs']:
-                    branch = bucket.get(doc['_yz_rk'])
-                    print branch.data
-                    b_name = branch.data['branch_s'].split('.')[root_len:root_len + 1][0]
-                    branches[b_name] = 1
-                    print b_name
-                for b_name in branches:
-                    yield BranchNode(b_name)
-            else:
-                solr_query = node_query(query.pattern)
-                node_results = bucket.search("node_s:%s" % solr_query, index='metric_nodes')
-                print "Node search results"
-                print(node_results['docs'])
-                if len(node_results) > 0:
-                    for doc in node_results['docs']:
-                        yield LeafNode(doc['_yz_rk'],RiakTSReader(doc['_yz_rk'], self.riak, self.config))
-                else:
-                    print "Object not found"
+            for doc in results['docs']:
+                branch = bucket.get(doc['_yz_rk'])
+                branch_node = BranchNode(branch.data['branch_s'])
+                #print "BranchNode: name: %s, path: %s" % (branch_node.name, branch_node.path)
+                yield branch_node
+            node_results = bucket.search("node_s:/%s/" % pattern, index='metric_nodes', rows=1000000)
+            #print "Node search results"
+            print(node_results['docs'])
+            for doc in node_results['docs']:
+                node = bucket.get(doc['_yz_rk'])
+                node_name = node.data['node_s']
+                yield LeafNode(node_name, RiakTSReader(node_name, self.riak, self.config))
+
 
 class RiakTSReader(object):
-    __slots__ = ('node','riak','config')
+    __slots__ = ('node', 'riak', 'config')
 
     def __init__(self, node, riak, config):
         self.node = node
@@ -127,7 +105,6 @@ time > {t1} and time < {t2}
 
             rows.extend(results.rows)
             cursor = next_cursor
-
 
         print rows
 
