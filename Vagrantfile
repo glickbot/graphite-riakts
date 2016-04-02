@@ -73,7 +73,7 @@ Vagrant.configure(2) do |config|
     python setup.py install
     cd ..
     apt-get install -y python-dev libffi-dev libssl-dev
-    pip install riak
+    pip install riak pandas
     git clone https://github.com/brutasse/graphite-api
     cd graphite-api
     pip install -r requirements.txt

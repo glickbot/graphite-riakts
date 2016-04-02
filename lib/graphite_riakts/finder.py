@@ -1,5 +1,6 @@
 import time
 import re
+import pandas as pd
 
 try:
     from graphite_api.intervals import Interval, IntervalSet
@@ -71,7 +72,6 @@ class RiakTSReader(object):
         return IntervalSet([Interval(0, int(time.time()))])
 
     def fetch(self, startTime, endTime):
-        print "WHAT"
         print "RiakTSReader.fetch(%s,%s) for node %s" % (startTime,endTime,self.node)
         select = """
 select time, metric from {table} where
@@ -88,11 +88,12 @@ time > {t1} and time < {t2}
         if endTime == None:
             endTime = datetime.now()
         if startTime == None:
-            startTime = end - timedelta(1)
+            startTime = endTime - timedelta(1)
         start = datetime.fromtimestamp(startTime)
         end = datetime.fromtimestamp(endTime)
         max_span = timedelta(0, int(quanta) * 3)
         cursor = start
+        print "[%s] %s - %s: Gathering..." % (self.node, start, end)
         while cursor < end:
             if cursor + max_span > end:
                 next_cursor = end
@@ -100,20 +101,42 @@ time > {t1} and time < {t2}
                 next_cursor = cursor + max_span
 
             q = select.format(table=table,family=family,series=self.node,t1=dt_to_ms(cursor),t2=dt_to_ms(next_cursor))
-            print q
+            #print q
             results = self.riak.ts_query(table,q)
 
             rows.extend(results.rows)
+            print "[%s] %s - %s: %d" % (self.node, cursor, next_cursor, len(results.rows))
             cursor = next_cursor
 
-        print rows
+        # PANDA HELP
+        df = pd.DataFrame(rows)
+        ts = df.set_index(0)
+        #ts.to_csv('%s.csv' % self.node)
+        # Rounding to nearest timestep
+        ts.index = ts.index.round("%sS" % timestep).snap("%sS" % timestep)
+        # deduplicating potential collisions due to rounding
+        ts = ts[~ts.index.duplicated(keep='last')]
+        # Creating all steps
+        index = pd.date_range(start=ts.index[0], end=ts.index[-1], freq="%sS" % timestep)
+        # Reindexing values, filling in blankes
+        try:
+            fixed = ts.reindex(index, fill_value=None)
+        except ValueError as e:
+            print "!!! Value Error !!!: %s" % e
+            fixed = ts
+        # for debugging
+        # fixed.to_csv("%s-fixed.csv" % self.node)
 
         try:
-            first_time = dt_to_timestamp(rows[0][0])
-            last_time = dt_to_timestamp(rows[-1][0])
+            #first_time = dt_to_timestamp(rows[0][0])
+            #last_time = dt_to_timestamp(rows[-1][0])
+            #values = [row[1] for row in rows]
+            first_time = fixed.index[0].value // 10**9
+            last_time = fixed.index[-1].value // 10**9
             time_info = (first_time,last_time,timestep)
-            values = [row[1] for row in rows]
+            values = fixed.values
         except IndexError:
+            print "!!! INDEX ERROR !!!"
             time_info = (dt_to_timestamp(start),dt_to_timestamp(end),timestep)
             values = []
 
