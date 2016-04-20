@@ -32,32 +32,39 @@ class RiakTSFinder(object):
         #print vars(query)
         bucket = self.riak.bucket_type('default').bucket('metric_nodes')
 
-        exact = bucket.get(query.pattern)
+        exact = bucket.get("node-%s" % query.pattern)
         nodes = []
         if exact.exists:
             yield LeafNode(query.pattern,RiakTSReader(query.pattern, self.riak, self.config))
         else:
             pattern = query.pattern
             pattern = re.sub('\.select metric','',pattern)
+            # If there's not a star in the pattern:
             if re.match('^[^*]*$', pattern):
+              # remove any possible trailing .'s, and add a .* at the end
               pattern = re.sub('\.*$', '.*', pattern)
+            # Replace all embeded *'s with a Solr regex compatible wildcard, scoped between .'s: [^.]*
             pattern = re.sub('\*','[^.]*', pattern)
             print "Solr pattern: %s" % pattern
             results = bucket.search("branch_s:/%s/" % pattern, index='metric_nodes', rows=1000000)
-            #print "Branch search results"
+
             print(results)
-            for doc in results['docs']:
-                branch = bucket.get(doc['_yz_rk'])
-                branch_node = BranchNode(branch.data['branch_s'])
-                #print "BranchNode: name: %s, path: %s" % (branch_node.name, branch_node.path)
-                yield branch_node
-            node_results = bucket.search("node_s:/%s/" % pattern, index='metric_nodes', rows=1000000)
-            #print "Node search results"
-            print(node_results['docs'])
-            for doc in node_results['docs']:
-                node = bucket.get(doc['_yz_rk'])
-                node_name = node.data['node_s']
-                yield LeafNode(node_name, RiakTSReader(node_name, self.riak, self.config))
+            if results['num_found'] > 0:
+                print "Branch search results"
+                for doc in results['docs']:
+                    branch = bucket.get(doc['_yz_rk'])
+                    branch_node = BranchNode(branch.data['branch_s'])
+                    print "BranchNode: name: %s, path: %s" % (branch_node.name, branch_node.path)
+                    yield branch_node
+            else:
+                node_results = bucket.search("node_s:/%s/" % pattern, index='metric_nodes', rows=1000000)
+                print "Node search results"
+                print(node_results['docs'])
+                for doc in node_results['docs']:
+                    node = bucket.get(doc['_yz_rk'])
+                    node_name = node.data['node_s']
+                    print "Node: %s" % node_name
+                    yield LeafNode(node_name, RiakTSReader(node_name, self.riak, self.config))
 
 
 class RiakTSReader(object):
